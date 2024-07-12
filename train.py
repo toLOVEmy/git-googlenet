@@ -32,16 +32,13 @@ def main():
                                          transform=data_transform["train"])
     train_num = len(train_dataset)
 
-    # {'daisy':0, 'dandelion':1, 'roses':2, 'sunflower':3, 'tulips':4}
     flower_list = train_dataset.class_to_idx
     cla_dict = dict((val, key) for key, val in flower_list.items())
-    # write dict into json file
     json_str = json.dumps(cla_dict, indent=4)
     with open('class_indices.json', 'w') as json_file:
         json_file.write(json_str)
 
     batch_size = 32
-    # nw = min([os.cpu_count(), batch_size if batch_size > 1 else 0, 8])  # number of workers
     nw = min([os.cpu_count(), batch_size if batch_size > 1 else 0, 0])  # windows下线程设为0就行，linux下可以设为8
     print('Using {} dataloader workers every process'.format(nw))
 
@@ -62,7 +59,10 @@ def main():
     net = GoogLeNet(num_classes=5, aux_logits=True, init_weights=True)
     net.to(device)
     loss_function = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(net.parameters(), lr=0.0003)
+    optimizer = optim.Adam(net.parameters(), lr=0.4)
+
+    # 使用余弦退火学习率调度器
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=60, eta_min=0)
 
     epochs = 60
     best_acc = 0.0
@@ -110,6 +110,9 @@ def main():
                                                                      loss)
         train_loss = running_loss / train_steps
         train_accuracy = correct_train / train_num
+
+        # 更新学习率
+        scheduler.step()
 
         # validate
         net.eval()
