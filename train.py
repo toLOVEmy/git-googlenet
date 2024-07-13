@@ -26,7 +26,7 @@ def main():
                                    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])}
 
     data_root = os.path.abspath(os.path.join(os.getcwd(), "../../.."))  # get data root path
-    image_path = os.path.join(data_root, "SCUT-FBP5500_1", "SCUT-FBP5500")  # flower data set path
+    image_path = os.path.join(data_root, "SCUT-FBP5500_1", "SCUT-FBP5500")  # dataset path
     assert os.path.exists(image_path), "{} path does not exist.".format(image_path)
     train_dataset = datasets.ImageFolder(root=os.path.join(image_path, "train"),
                                          transform=data_transform["train"])
@@ -39,7 +39,7 @@ def main():
         json_file.write(json_str)
 
     batch_size = 32
-    nw = min([os.cpu_count(), batch_size if batch_size > 1 else 0, 0])  # windows下线程设为0就行，linux下可以设为8
+    nw = min([os.cpu_count(), batch_size if batch_size > 1 else 0, 0])  # set number of workers
     print('Using {} dataloader workers every process'.format(nw))
 
     train_loader = torch.utils.data.DataLoader(train_dataset,
@@ -58,19 +58,23 @@ def main():
 
     net = GoogLeNet(num_classes=5, aux_logits=True, init_weights=True)
     net.to(device)
+
+    # Using mixed precision training
+    scaler = torch.cuda.amp.GradScaler()
+
     loss_function = nn.CrossEntropyLoss()
     optimizer = optim.Adam(net.parameters(), lr=0.00015)
 
-    # 使用余弦退火学习率调度器
+    # Use cosine annealing scheduler
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=60, eta_min=0)
 
     epochs = 60
     best_acc = 0.0
-    save_path = '.\FBPgoogleNet015.pth'
+    save_path = '.\FBPgoogleNet015_FP16.pth'
     train_steps = len(train_loader)
 
     # Log file path
-    log_file = 'training_log011.txt'
+    log_file = 'training_log015_FP16.txt'
 
     # Check if log file exists
     if os.path.exists(log_file):
@@ -80,7 +84,7 @@ def main():
         with open(log_file, 'w') as f:
             f.write('Epoch,Training Loss,Validation Loss,Training Accuracy,Validation Accuracy,Time Taken\n')
 
-    train_start_time = time.perf_counter()  # 记录训练开始时间，用于计算训练用时
+    train_start_time = time.perf_counter()  # record training start time
 
     for epoch in range(epochs):
         epoch_start_time = time.perf_counter()
@@ -93,13 +97,17 @@ def main():
         for step, data in enumerate(train_bar):
             images, labels = data
             optimizer.zero_grad()
-            logits, aux_logits2, aux_logits1 = net(images.to(device))
-            loss0 = loss_function(logits, labels.to(device))
-            loss1 = loss_function(aux_logits1, labels.to(device))
-            loss2 = loss_function(aux_logits2, labels.to(device))
-            loss = loss0 + loss1 * 0.3 + loss2 * 0.3
-            loss.backward()
-            optimizer.step()
+
+            with torch.cuda.amp.autocast():
+                logits, aux_logits2, aux_logits1 = net(images.to(device))
+                loss0 = loss_function(logits, labels.to(device))
+                loss1 = loss_function(aux_logits1, labels.to(device))
+                loss2 = loss_function(aux_logits2, labels.to(device))
+                loss = loss0 + loss1 * 0.3 + loss2 * 0.3
+
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
             running_loss += loss.item()
             _, preds = torch.max(logits, 1)
@@ -111,7 +119,7 @@ def main():
         train_loss = running_loss / train_steps
         train_accuracy = correct_train / train_num
 
-        # 更新学习率
+        # Update learning rate
         scheduler.step()
 
         # validate
@@ -122,8 +130,9 @@ def main():
             val_bar = tqdm(validate_loader, file=sys.stdout)
             for val_data in val_bar:
                 val_images, val_labels = val_data
-                outputs = net(val_images.to(device))  # eval model only have last output layer
-                loss = loss_function(outputs, val_labels.to(device))
+                with torch.cuda.amp.autocast():
+                    outputs = net(val_images.to(device))  # eval model only have last output layer
+                    loss = loss_function(outputs, val_labels.to(device))
                 val_loss += loss.item()
                 predict_y = torch.max(outputs, dim=1)[1]
                 acc += torch.eq(predict_y, val_labels.to(device)).sum().item()
