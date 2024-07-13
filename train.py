@@ -59,18 +59,18 @@ def main():
     net = GoogLeNet(num_classes=5, aux_logits=True, init_weights=True)
     net.to(device)
     loss_function = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(net.parameters(), lr=0.4)
+    optimizer = optim.Adam(net.parameters(), lr=0.00015)
 
     # 使用余弦退火学习率调度器
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=60, eta_min=0)
 
     epochs = 60
     best_acc = 0.0
-    save_path = r'E:\xwc\pycharm_virtual_cnn\SCUT-FBP5500_1\SCUT-FBP5500\FBPgoogleNet.pth'
+    save_path = '.\FBPgoogleNet015.pth'
     train_steps = len(train_loader)
 
     # Log file path
-    log_file = 'training_log.txt'
+    log_file = 'training_log011.txt'
 
     # Check if log file exists
     if os.path.exists(log_file):
