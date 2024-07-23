@@ -3,12 +3,15 @@ import json
 import torch
 from PIL import Image
 from torchvision import transforms
-from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix, roc_auc_score, cohen_kappa_score, classification_report
+from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix, roc_auc_score, cohen_kappa_score, \
+    classification_report
 import matplotlib.pyplot as plt
 import numpy as np
-import itertools  # 导入 itertools
+import itertools
+from openpyxl import load_workbook
 
 from model import GoogLeNet
+
 
 def plot_confusion_matrix(cm, classes,
                           normalize=False,
@@ -37,6 +40,28 @@ def plot_confusion_matrix(cm, classes,
     plt.tight_layout()
     plt.ylabel('True label')
     plt.xlabel('Predicted label')
+
+
+def append_to_excel(file_path, data):
+    if not os.path.exists(file_path):
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Metrics"
+        headers = ["Accuracy",
+                   "Recall_0", "Recall_1", "Recall_2", "Recall_3", "Recall_4",
+                   "Precision_0", "Precision_1", "Precision_2", "Precision_3", "Precision_4",
+                   "Macro_Averaged_Precision", "Macro_Averaged_Recall"]
+        ws.append(headers)
+        wb.save(file_path)
+
+    wb = load_workbook(file_path)
+    ws = wb.active
+
+    ws.append(data)
+
+    wb.save(file_path)
+
 
 def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -71,7 +96,9 @@ def main():
 
     model = GoogLeNet(num_classes=5, aux_logits=False).to(device)
 
-    weights_path = '.\FBPgoogleNet.pth'
+    weights_path = '.\FBPgoogleNet012.pth'
+    # weights_path = r'E:\xwc\pycharm_virtual_cnn\SCUT-FBP5500_1\SCUT-FBP5500\FBPgoogleNet.pth'
+
     assert os.path.exists(weights_path), f"file: '{weights_path}' dose not exist."
     missing_keys, unexpected_keys = model.load_state_dict(torch.load(weights_path, map_location=device), strict=False)
 
@@ -139,7 +166,7 @@ def main():
 
         plt.figure()
         plot_confusion_matrix(cm, classes=list(class_indict.values()), title='Confusion Matrix')
-        plt.show()
+        # plt.show()
 
         if len(np.unique(all_labels)) == 2:  # 只有在二分类时才计算ROC AUC
             roc_auc = roc_auc_score(all_labels, all_probs)
@@ -149,7 +176,26 @@ def main():
         report = classification_report(all_labels, all_preds, target_names=list(class_indict.values()), zero_division=0)
         print(report)
 
-        print("\n总测试数量有：{}，总的预测正确数量: {},准确率为：{}".format(len(img_path_list), correct_count, correct_count / len(img_path_list)))
+        report_dict = classification_report(all_labels, all_preds, target_names=list(class_indict.values()),
+                                            zero_division=0, output_dict=True)
+
+        recalls = []
+        precisions = []
+        for class_name, metrics in report_dict.items():
+            if isinstance(metrics, dict):
+                recalls.append(metrics['recall'])
+                precisions.append(metrics['precision'])
+                print(f"类 '{class_name}' 的精确率: {metrics['precision']:.4f}")
+                print(f"类 '{class_name}' 的召回率: {metrics['recall']:.4f}")
+
+        accuracy = correct_count / len(img_path_list)
+        data_to_append = [accuracy] + recalls + precisions + [macro_precision, macro_recall]
+
+        excel_file_path = 'TestResult.xlsx'
+        append_to_excel(excel_file_path, data_to_append)
+
+        print("\n总测试数量有：{}，总的预测正确数量: {},准确率为：{}".format(len(img_path_list), correct_count, accuracy))
+
 
 if __name__ == '__main__':
     main()
